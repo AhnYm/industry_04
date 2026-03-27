@@ -95,6 +95,6 @@ while True:
         led.allOff()
         delay(200)  
     else:
-            # 레벨 0:
-            led.allOff()
-            delay(50)
+        # 레벨 0:
+        led.allOff()
+        delay(50)
