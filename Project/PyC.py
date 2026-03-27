@@ -22,6 +22,9 @@ limit_dist=20  #20cm 이하면 위험
 limit_sound=2055  #2055 이상이면 위험
 limit_light=600  #600 이하면 위험
 
+#변수 초기화
+last_check_time = 0 
+danger_count = 0
 
 #각 기준치를 넘을 시에 led등이 켜짐
 while True:
@@ -38,7 +41,6 @@ while True:
         light=cds.readAverage()
     
         #위험도 체크
-        danger_count=0
         if temp>=limit_temp:
             danger_count+=1 
         if humid>=limit_humid:
@@ -72,14 +74,15 @@ while True:
         oled.display()
                 
         last_check_time = current_time # 마지막 체크 시점 갱신
+        
     #단계별 led와 부저 제어
-    # 레벨 5: 가장 길게 연속음
+    # 레벨 5(위험 단계): 가장 길게 연속음
     if danger_count == 5:
         led.allOn()
         buzzer.tone(4, 2, 1)
         delay(10)
         led.allOff()
-    # 레벨 3~4: 빠르게
+    # 레벨 3~4(경계 단계): 빠르게
     elif danger_count>= 3:
         for i in range(danger_count): 
             led[i].on()
@@ -87,6 +90,7 @@ while True:
         delay(100)
         led.allOff()
         delay(100)
+    # 레벨 1~2(주의 단계): 느리게
     elif danger_count>= 1:
         for i in range(danger_count): 
             led[i].on()
@@ -95,6 +99,6 @@ while True:
         led.allOff()
         delay(200)  
     else:
-        # 레벨 0:
+        # 레벨 0(안전 상태) : 무반
         led.allOff()
         delay(50)
