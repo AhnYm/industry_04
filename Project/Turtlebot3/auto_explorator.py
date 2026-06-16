@@ -5,6 +5,7 @@ from geometry_msgs.msg import PoseStamped
 # Nav2 Action 서버와 통신하기 위한 라이브러리
 from rclpy.action import ActionClient
 from nav2_msgs.action import NavigateToPose
+import math
 
 class AutoExplorator(Node):
     def __init__(self):
@@ -16,26 +17,22 @@ class AutoExplorator(Node):
         # [이유] 결정된 목적지를 Nav2 Action 서버로 보내 로봇을 움직이기 위해 Client 생성
         self.nav_action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         
-        self.latest_map = None
+        self.is_moving = False
         self.get_logger().info('터틀봇3 직접 짜는 자율 탐색 노드가 시작되었습니다.')
 
     def map_callback(self, msg):
-        """ SLAM으로부터 실시간 지도가 들어올 때마다 실행되는 함수 """
-        self.latest_map = msg
-        # 지도가 들어오면 자동 탐색 알고리즘 루프 실행
-        self.run_exploration_loop()
-
-    def run_exploration_loop(self):
-        if self.latest_map is None:
+        if self.is_moving:
             return
 
         # -----------------------------------------------------------------
         # [1단계] 1차원 지도 배열을 2차원(행렬) 공간 좌표로 변환
         # -----------------------------------------------------------------
-        width = self.latest_map.info.width
-        height = self.latest_map.info.height
-        map_data = self.latest_map.data  # 1차원 리스트 형태 (-1, 0, 100으로 구성됨)
-        
+        width = msg.info.width
+        height = msg.info.height
+        map_data = msg.data
+        resolution = msg.info.resolution
+        origin_x = msg.info.origin.position.x
+        origin_y = msg.info.origin.position.y
         # 1차원 배열을 행과 열을 가진 2차원 공간 지도(Matrix)로 재정렬
         grid_map = [map_data[i * width:(i + 1) * width] for i in range(height)]
 
@@ -45,13 +42,13 @@ class AutoExplorator(Node):
         frontiers = []
         for y in range(1, height - 1):
             for x in range(1, width - 1):
-                # 내가 있는 칸이 안전구역(0)이고
                 if grid_map[y][x] == 0:
-                    # 상하좌우 이웃한 칸 중에 미지 구역(-1)이 하나라도 있다면?
                     if (grid_map[y+1][x] == -1 or grid_map[y-1][x] == -1 or 
                         grid_map[y][x+1] == -1 or grid_map[y][x-1] == -1):
-                        # 그곳이 바로 탐색해야 할 '경계점(Frontier)'입니다.
-                        frontiers.append((x, y))
+                        
+                        rx = x * resolution + origin_x
+                        ry = y * resolution + origin_y
+                        frontiers.append((rx, ry))
 
         # -----------------------------------------------------------------
         # [3단계] 검출된 수많은 경계점 중 최적의 목적지(Goal) 1개 선정
@@ -60,35 +57,48 @@ class AutoExplorator(Node):
             self.get_logger().info('더 이상 갈 곳이 없습니다. 탐색 완료!')
             return
 
-        # [우선순위 로직 기획 내용]
-        # 계산 편의상 가장 먼저 발견된 첫 번째 경계점을 목적지로 임시 설정합니다.
-        # (실제 고도화 단계에서는 '로봇과 가장 가까운 점'을 수학적 거리 공식으로 연산하여 고릅니다.)
-        target_grid_x, target_grid_y = frontiers[0]
+# 최단거리 프론티어 연산 로직 (로봇 중심 기준)
+        robot_x = 0.0 
+        robot_y = 0.0
 
-        # 픽셀(격자) 주소를 실제 로봇이 다니는 현실 세계 좌표(미터 단위)로 변환합니다.
-        resolution = self.latest_map.info.resolution  # 격자 한 칸의 실제 크기 (예: 0.05m)
-        origin_x = self.latest_map.info.origin.position.x
-        origin_y = self.latest_map.info.origin.position.y
+        best_target = frontiers[0]
+        min_distance = float('inf')
 
-        real_world_x = target_grid_x * resolution + origin_x
-        real_world_y = target_grid_y * resolution + origin_y
+        for fx, fy in frontiers:
+            distance = math.sqrt((fx - robot_x)**2 + (fy - robot_y)**2)
+            if distance < min_distance and distance > 0.3:
+                min_distance = distance
+                best_target = (fx, fy)
 
-        # -----------------------------------------------------------------
-        # [4단계] 선정된 좌표를 Nav2 명령으로 전송하여 로봇 이동시키기
-        # -----------------------------------------------------------------
-        self.send_goal(real_world_x, real_world_y)
+        final_x, final_y = best_target
+        self.send_goal_to_nav2(final_x, final_y)
 
-    def send_goal(self, x, y):
-        # Nav2가 알아듣는 Action Goal 메시지 형식에 맞춰 데이터 포장
+    def send_goal_to_nav2(self, x, y):
+        self.is_moving = True
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
+        goal_msg.pose.pose.orientation.w = 1.0
+
+        self.get_logger().info(f'🎯 [타깃 전송] X: {x:.2f}m, Y: {y:.2f}m (최단거리: {math.sqrt(x**2+y**2):.2f}m)')
         
-        # Action 서버가 준비되었는지 확인 후 목적지 전송
         self.nav_action_client.wait_for_server()
-        self.nav_action_client.send_goal_async(goal_msg)
-        self.get_logger().info(f'새로운 탐색 목적지 발송 완료: X={x:.2f}, Y={y:.2f}')
+        send_goal_future = self.nav_action_client.send_goal_async(goal_msg)
+        send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.is_moving = False
+            return
+        get_result_future = goal_handle.get_result_async()
+        get_result_future.add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        self.get_logger().info('🏁 목적지 개척 완료. 맵 재분석을 시작합니다.')
+        self.is_moving = False
 
 def main(args=None):
     rp.init(args=args)
