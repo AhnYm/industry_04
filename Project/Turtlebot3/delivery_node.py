@@ -1,5 +1,4 @@
 import rclpy as rp  # ROS 2 Python 클라이언트 라이브러리 임포트
-from rclpy.duration import Duration  # 시간 간격을 다루기 위한 Duration 클래스 임포트
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult  # Nav2 내비게이션 제어 및 결과 확인을 위한 클래스 임포트
 from geometry_msgs.msg import PoseStamped  # 로봇의 위치와 방향 정보를 담는 메시지 타입 임포트
 import math  # 오일러 각도를 라디안으로 변환하기 위한 수학 라이브러리 임포트
@@ -25,7 +24,7 @@ def main():
     nav = BasicNavigator()  # Nav2 내비게이션 명령을 내릴 제어 객체 생성
 
     # 1. 각 구간별 주행 경로 (경유지들 + 최종 목적지) 설정 단계
-    
+
     # 1) 홈 -> C구역 이동 경로 데이터 정의
     waypoints_to_C = [
         create_pose(nav, 1.754, 0.005, 0.0),    # 갈림길 우회를 위한 첫 번째 고정 경유지
@@ -53,7 +52,7 @@ def main():
         create_pose(nav, -0.203, 0.366, 150)    # 경유지 3
     ]
     goal_home = create_pose(nav, -0.723, -0.578, 0)    # 출발지 원점(Home) 최종 정지 목적지
-
+    
     # 순차 배송 태스크 데이터를 딕셔너리 리스트 구조로 체계화
     delivery_tasks = [
         {"name": "C 구역", "waypoints": waypoints_to_C, "goal": goal_C},
@@ -63,7 +62,7 @@ def main():
 
     print("\n지정 경로 순차 배송를 시작합니다.")
 
-    # 2. 고정 경로를 따라 순차 배송 루프 제어 시작
+    # 2. 순차 배송 루프 구동
     for task in delivery_tasks:
         print(f"\n지정된 경로를 통해 {task['name']}(으)로 이동을 시작합니다.")
         
